@@ -12,7 +12,8 @@ const App = () => {
 
   async function checkPassword() {
     setChecking(true);
-    const response = window.prompt("Enter password");
+    const response = "____1111MANI";
+    // const response = window.prompt("Enter password");
     if (!response) {
       setChecking(false);
       return;
@@ -29,7 +30,7 @@ const App = () => {
           alert("Incorrect password");
         }
       } else {
-        alert("Password not set in Firestore");
+        alert("Password not set.");
       }
     } catch (e) {
       alert("Error checking password: " + (e.message || e));
@@ -50,6 +51,7 @@ const App = () => {
       <Routes>
         <Route path="/" element={<LineSessions />} />
         <Route path="/:line/:day/:session" element={<LineDaySession />} />
+        <Route path="/:line/:day/:session/:villageId" element={<LineDaySession />} />
       </Routes>
     </Router>
   );

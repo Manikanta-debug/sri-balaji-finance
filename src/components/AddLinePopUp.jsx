@@ -45,6 +45,18 @@ const AddLinePopUp = ({ loading, onSubmit, days, sessions, setIsModalOpen, addMo
         />
       </>
     );
+  } else if (addMode === "village") {
+    title = "Add Village";
+    inputField = (
+      <input
+        type="text"
+        placeholder="Village name"
+        value={formData.village || ""}
+        onChange={(e) => setFormData({ ...formData, village: e.target.value })}
+        className="outline-none border rounded-lg p-2 focus:ring-2 focus:ring-emerald-500"
+        required
+      />
+    );
   } else if (addMode === "day") {
     title = "Add Day";
     inputField = (
@@ -97,6 +109,7 @@ const AddLinePopUp = ({ loading, onSubmit, days, sessions, setIsModalOpen, addMo
                 (addMode === "line" && (!formData.line || !formData.password)) ||
                 (addMode === "day" && !formData.day) ||
                 (addMode === "session" && !formData.session) ||
+                (addMode === "village" && !formData.village) ||
                 loading
               }
               className="px-4 py-2 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
