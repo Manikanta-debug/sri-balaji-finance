@@ -52,7 +52,7 @@ const App = () => {
   const commonProps = { unlockedLines, setUnlockedLines };
 
   return (
-    <Router basename="/reddyfinance">
+    <Router basename="/sri-balaji-finance">
       <Routes>
         <Route path="/" element={<LineSessions {...commonProps} />} />
         <Route path="/:lineId" element={<LineSessions {...commonProps} />} />
