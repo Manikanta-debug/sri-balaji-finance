@@ -14,8 +14,7 @@ const App = () => {
 
   async function checkPassword() {
     setChecking(true);
-    const response = "____1111MANI";
-    // const response = window.prompt("Enter password");
+    const response = window.prompt("Enter password");
     if (!response) {
       setChecking(false);
       return;
