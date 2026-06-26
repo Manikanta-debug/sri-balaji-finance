@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { db } from "../firebase";
 import { useParams } from "react-router-dom";
-import { collection, addDoc, getDocs, doc as firestoreDoc, updateDoc } from "firebase/firestore";
+import { collection, addDoc, getDocs, getDoc, doc as firestoreDoc, updateDoc } from "firebase/firestore";
 export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, onRepay }) {
   console.log(newCardNo)
   const isRepay = !!borrower;
@@ -15,7 +15,7 @@ export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, 
   const [mobileNo, setMobileNo] = useState(borrower && borrower.mobileNo ? borrower.mobileNo : "");
   const [location, setLocation] = useState(borrower && borrower.location ? borrower.location : "");
 
-  const { line, day, session } = useParams();
+  const { lineId, day, session } = useParams();
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -57,8 +57,7 @@ export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, 
         onAdd(newBorrower);
       }
 
-      // Optimize: Use lineId from params instead of fetching all lines
-      const [lineId] = line.split("-");
+      // Optimize: Use lineId directly from params
       if (lineId) {
         const lineRef = firestoreDoc(db, "lines", lineId);
         const lineSnap = await getDoc(lineRef);
@@ -80,7 +79,7 @@ export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, 
   return (
     <div className="fixed inset-0 bg-transparent flex items-center justify-center z-50">
       <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
-        <h2 className="text-xl font-bold text-emerald-700 mb-4">{isRepay ? "Repay & Renew Loan" : "Add New Borrower"}</h2>
+        <h2 className="text-xl font-bold text-yellow-500 mb-4">{isRepay ? "Repay & Renew Loan" : "Add New Borrower"}</h2>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           {!isRepay && (
@@ -92,7 +91,7 @@ export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, 
                 type="number"
                 value={cardNo}
                 onChange={(e) => setCardNo(e.target.value)}
-                className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-yellow-400"
                 placeholder="Enter card number"
                 required
                 pattern="[0-9]*"
@@ -109,7 +108,7 @@ export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, 
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-emerald-500"
+            className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-yellow-400"
             placeholder="Enter borrower name"
             required
             autoFocus={!isRepay ? false : true}
@@ -125,7 +124,7 @@ export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, 
             type="number"
             value={borrowed}
             onChange={(e) => setBorrowed(e.target.value)}
-            className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-emerald-500"
+            className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-yellow-400"
             placeholder="Enter amount"
             min="0"
             step="0.01"
@@ -139,7 +138,7 @@ export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, 
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-emerald-500"
+              className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-yellow-400"
               required
             />
           </div>
@@ -149,7 +148,7 @@ export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, 
               type="text"
               value={location}
               onChange={e => setLocation(e.target.value)}
-              className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-emerald-500"
+              className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-yellow-400"
               placeholder="Enter location"
             />
           </div>
@@ -159,7 +158,7 @@ export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, 
               type="tel"
               value={mobileNo}
               onChange={e => setMobileNo(e.target.value)}
-              className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-emerald-500"
+              className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-yellow-400"
               placeholder="Enter mobile number"
               pattern="[0-9]*"
               inputMode="numeric"
@@ -176,7 +175,7 @@ export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, 
             </button>
             <button
               type="submit"
-              className="px-4 py-2 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
+              className="px-4 py-2 rounded bg-yellow-400 text-black hover:bg-yellow-500 disabled:opacity-60"
               disabled={submitting}
             >
               {submitting ? (isRepay ? "Renewing..." : "Adding...") : (isRepay ? "Repay & Renew" : "Add Borrower")}

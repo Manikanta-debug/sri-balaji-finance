@@ -2,7 +2,7 @@ const SessionTable=({last5Weeks, borrowers, setSelectedBorrower, setEditingBorro
   return (
       <div className="w-screen h-screen flex flex-col bg-white flex-1 overflow-auto">
         <table className="w-full border-collapse">
-          <thead className="bg-emerald-100 sticky top-0 z-10">
+          <thead className="bg-yellow-100 sticky top-0 z-10">
             <tr>
               <th className="border px-3 py-2 text-left">Card No</th>
               <th className="border px-3 py-2 text-left">Name</th>
@@ -22,22 +22,22 @@ const SessionTable=({last5Weeks, borrowers, setSelectedBorrower, setEditingBorro
               const loan = b.loan;
               if (!loan) return null;
 
-              const totalRepaid = loan.payments.reduce(
+              const totalRepaid = (loan.payments || []).reduce(
                 (sum, p) => sum + p.amount,
                 0
               );
               const balance = loan.borrowed - totalRepaid;
 
               return (
-                <tr key={b.id} className="hover:bg-emerald-50">
+                <tr key={b.id} className="hover:bg-yellow-50">
                   <td
-                    className="border border-black px-3 py-2 cursor-pointer text-emerald-700 hover:underline"
+                    className="border border-black px-3 py-2 cursor-pointer text-yellow-500 hover:underline"
                     onClick={() => setSelectedBorrower(b)}
                   >
                     {loan.cardNo}
                   </td>
                   <td
-                    className="border border-black px-3 py-2 cursor-pointer text-emerald-700 hover:underline"
+                    className="border border-black px-3 py-2 cursor-pointer text-yellow-500 hover:underline"
                     onClick={() => setSelectedBorrower(b)}
                   >
                     {b.name}
@@ -55,7 +55,7 @@ const SessionTable=({last5Weeks, borrowers, setSelectedBorrower, setEditingBorro
                     {balance === 0 ? (
                       <button
                         onClick={() => setRepayBorrower(b)}
-                        className="text-sm px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-600 text-white"
+                        className="text-sm px-2 py-1 rounded bg-yellow-400 hover:bg-yellow-500 text-black"
                       >
                         Repay
                       </button>
@@ -69,7 +69,7 @@ const SessionTable=({last5Weeks, borrowers, setSelectedBorrower, setEditingBorro
                     )}
                   </td>
                   {last5Weeks.map((date) => {
-                    const payment = loan.payments.find((p) => p.date === date);
+                    const payment = (loan.payments || []).find((p) => p.date === date);
                     return (
                       <td key={date} className="border px-3 py-2 text-right">
                         {payment ? payment.amount : "X"}

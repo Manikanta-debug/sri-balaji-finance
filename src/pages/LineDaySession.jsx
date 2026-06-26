@@ -1,6 +1,6 @@
 import { useReducer, useMemo, useState, useEffect } from "react";
 import { db } from "../firebase";
-import { collection, getDocs, addDoc, updateDoc, doc, deleteDoc, orderBy, query, getDoc } from "firebase/firestore";
+import { collection, getDocs, addDoc, updateDoc, doc, deleteDoc, orderBy, query, getDoc, increment, setDoc } from "firebase/firestore";
 import { useParams, useNavigate } from "react-router-dom";
 import BorrowerDetailsPopUp from "../components/BorrowerDetailsPopUp";
 import EditPaymentPopUp from "../components/EditPaymentPopUp";
@@ -23,48 +23,73 @@ function getLast5Weeks(startDateStr, page = 1) {
     return Array.from({ length: 5 }, (_, i) => {
         const d = new Date(baseDate);
         d.setDate(d.getDate() + i * 7);
-        return d.toLocaleDateString("en-GB");
+        const dd = String(d.getDate()).padStart(2, "0");
+        const mm = String(d.getMonth() + 1).padStart(2, "0");
+        const yyyy = d.getFullYear();
+        return `${dd}/${mm}/${yyyy}`;
     });
 }
 
-export default function LineDaySession() {
-    const { line, day, session, villageId } = useParams();
+export default function LineDaySession({ unlockedLines, setUnlockedLines }) {
+    const { lineId, day, session, villageId } = useParams();
     const navigate = useNavigate();
     const [villages, setVillages] = useState([]);
     const [borrowers, setBorrowers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [startDate, setStartDate] = useState(null);
+    const [lineName, setLineName] = useState("");
 
     const [page, setPage] = useState(1);
     const last5Weeks = getLast5Weeks(startDate, page);
 
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [addMode, setAddMode] = useState("village");
 
     // Memoize the selected village object
     const selectedVillage = useMemo(() => 
         villages.find(v => v.id === villageId), 
     [villages, villageId]);
 
-    // Split line param to get ID and Name
-    const [lineId, lineName] = line.split("-");
+    // Handle password check
+    useEffect(() => {
+        const checkAuth = async () => {
+            if (lineId && !unlockedLines.includes(lineId)) {
+                const lineRef = doc(db, "lines", lineId);
+                const lineSnap = await getDoc(lineRef);
+                if (lineSnap.exists()) {
+                    const entry = lineSnap.data();
+                    const userPwd = window.prompt(`Enter password for ${entry.line}:`);
+                    if (userPwd === entry.password) {
+                        setUnlockedLines(prev => [...prev, lineId]);
+                        setLineName(entry.line);
+                    } else {
+                        alert("Incorrect password");
+                        navigate("/");
+                    }
+                } else {
+                    navigate("/");
+                }
+            }
+        };
+        checkAuth();
+    }, [lineId, unlockedLines, navigate, setUnlockedLines]);
 
     useEffect(() => {
-        const fetchVillages = async () => {
+        const fetchLineInfoAndVillages = async () => {
             setLoading(true);
             try {
-                // Fetch Line config for startDate
+                // Fetch Line config
                 const lineRef = doc(db, "lines", lineId);
                 const lineSnap = await getDoc(lineRef);
                 if (lineSnap.exists()) {
                     const lineData = lineSnap.data();
+                    setLineName(lineData.line);
                     if (lineData.days && lineData.days[day]) {
                         setStartDate(lineData.days[day].startDate || null);
                     }
                 }
 
                 // Fetch Villages for this session
-                const sessionDocId = `${line}_${day}_${session}`;
+                const sessionDocId = `${lineId}_${day}_${session}`;
                 const villagesCol = collection(db, "lines", sessionDocId, "villages");
                 const snapshot = await getDocs(villagesCol);
                 const villageData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -75,11 +100,11 @@ export default function LineDaySession() {
                 setLoading(false);
             }
         };
-        fetchVillages();
-    }, [line, day, session, lineId]);
+        if (lineId && unlockedLines.includes(lineId)) fetchLineInfoAndVillages();
+    }, [lineId, day, session, unlockedLines]);
 
     useEffect(() => {
-        if (!villageId) {
+        if (!villageId || !unlockedLines.includes(lineId)) {
             setBorrowers([]);
             return;
         }
@@ -87,7 +112,7 @@ export default function LineDaySession() {
         const fetchBorrowers = async () => {
             setLoading(true);
             try {
-                const sessionDocId = `${line}_${day}_${session}`;
+                const sessionDocId = `${lineId}_${day}_${session}`;
                 const borrowersCol = query(
                     collection(db, "lines", sessionDocId, "villages", villageId, "borrowers"),
                     orderBy("loan.cardNo", "asc")
@@ -102,26 +127,69 @@ export default function LineDaySession() {
             }
         };
         fetchBorrowers();
-    }, [villageId, line, day, session]);
+    }, [villageId, lineId, day, session, unlockedLines]);
 
     const onAddVillage = async (data) => {
-        const villageName = data.village;
-        if (!villageName) return;
+        const vName = data.village;
+        if (!vName) return;
 
         setLoading(true);
         try {
-            const sessionDocId = `${line}_${day}_${session}`;
+            const sessionDocId = `${lineId}_${day}_${session}`;
             const villagesCol = collection(db, "lines", sessionDocId, "villages");
-            const docRef = await addDoc(villagesCol, { name: villageName });
-            const newVillage = { id: docRef.id, name: villageName };
+            const docRef = await addDoc(villagesCol, { name: vName });
+            const newVillage = { id: docRef.id, name: vName };
             setVillages(prev => [...prev, newVillage]);
             setIsModalOpen(false);
             // Auto-navigate to the new village
-            navigate(`/${line}/${day}/${session}/${docRef.id}`);
+            navigate(`/${lineId}/${day}/${session}/${docRef.id}`);
         } catch (error) {
             alert("Error adding village: " + error.message);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const updateMetadata = async (borrowedDiff, repaidDiff, countDiff, paymentDate = null, paymentAmountDiff = 0, loanDate = null, loanAmountDiff = 0) => {
+        const sessionDocId = `${lineId}_${day}_${session}`;
+        const paths = [
+            doc(db, "lines", lineId),
+            doc(db, "lines", sessionDocId),
+            doc(db, "lines", sessionDocId, "villages", villageId)
+        ];
+
+        for (const p of paths) {
+            await setDoc(p, {
+                stats: {
+                    totalBorrowed: increment(borrowedDiff),
+                    totalRepaid: increment(repaidDiff),
+                    totalBorrowers: increment(countDiff)
+                }
+            }, { merge: true });
+        }
+
+        // Daily Stats Tracking (Session-wise)
+        if (loanDate && loanAmountDiff !== 0) {
+            const dailyRef = doc(db, "lines", lineId, "dailyStats", loanDate);
+            await setDoc(dailyRef, {
+                [session]: {
+                    borrowed: increment(loanAmountDiff)
+                },
+                totalBorrowed: increment(loanAmountDiff)
+            }, { merge: true });
+        }
+
+        if (paymentDate && paymentAmountDiff !== 0) {
+            // Convert dd/mm/yyyy to yyyy-mm-dd for consistent storage
+            const [pd, pm, py] = paymentDate.split("/");
+            const dateId = `${py}-${pm}-${pd}`;
+            const dailyRef = doc(db, "lines", lineId, "dailyStats", dateId);
+            await setDoc(dailyRef, {
+                [session]: {
+                    repaid: increment(paymentAmountDiff)
+                },
+                totalRepaid: increment(paymentAmountDiff)
+            }, { merge: true });
         }
     };
 
@@ -135,39 +203,94 @@ export default function LineDaySession() {
             alert("Start date must be one of the current 5 dates shown in the table.");
             return;
         }
-        const sessionDocId = `${line}_${day}_${session}`;
+        const sessionDocId = `${lineId}_${day}_${session}`;
         const borrowersCol = collection(db, "lines", sessionDocId, "villages", villageId, "borrowers");
         const docRef = await addDoc(borrowersCol, newBorrower);
+        
+        // Update Metadata (including loanDate for dailyStats)
+        await updateMetadata(newBorrower.loan.borrowed, 0, 1, null, 0, newBorrower.loan.startDate, newBorrower.loan.borrowed);
+        
         setBorrowers(prev => [...prev, { ...newBorrower, id: docRef.id }]);
     };
 
-    const updateBorrower = async (borrowerId, updatedData) => {
+    const updateBorrower = async (borrowerId, updatedData, isRenew = false) => {
         if (!villageId) return;
+        
+        const oldBorrower = borrowers.find(b => b.id === borrowerId);
+        if (!oldBorrower) return;
         if (updatedData.loan && updatedData.loan.startDate) {
-            const allowedDates = last5Weeks.map(d => {
-                const [day, month, year] = d.split("/");
-                return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-            });
-            if (!allowedDates.includes(updatedData.loan.startDate)) {
+            if (!last5Weeks.includes(updatedData.selectedDate)) {
                 alert("Start date must be one of the current 5 dates shown in the table.");
                 return;
             }
         }
-        const sessionDocId = `${line}_${day}_${session}`;
+        const sessionDocId = `${lineId}_${day}_${session}`;
         const borrowerRef = doc(db, "lines", sessionDocId, "villages", villageId, "borrowers", borrowerId);
-        
-        // Clean up the data to avoid updating with 'id' field if it's there
         const { id, ...dataToUpdate } = updatedData;
-        
+        console.log(updatedData)
         await updateDoc(borrowerRef, dataToUpdate);
+
+        // Metadata Calculations
+        let borrowedDiff = 0;
+        let repaidDiff = 0;
+        let paymentDate = null;
+        let paymentAmountDiff = 0;
+        let loanDate = null;
+        let loanAmountDiff = 0;
+
+        if (updatedData.loan) {
+            if (isRenew) {
+                // For Renew:
+                // 1. Increment lifetime borrowed by the new borrowed amount
+                borrowedDiff = updatedData.loan.borrowed || 0;
+                loanDate = updatedData.loan.startDate;
+                loanAmountDiff = borrowedDiff;
+                // 2. Keep repaidDiff as 0 because the old repayments should stay in lifetime stats
+                repaidDiff = 0;
+            } else {
+                // Check for Borrowed amount change (e.g. during manual edits)
+                borrowedDiff = (updatedData.loan.borrowed || 0) - (oldBorrower.loan?.borrowed || 0);
+                if (borrowedDiff !== 0) {
+                    loanDate = updatedData.loan.startDate;
+                    loanAmountDiff = borrowedDiff;
+                }
+                
+                // Check for Payment changes
+                const oldTotalRepaid = oldBorrower.loan?.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
+                const newTotalRepaid = updatedData.loan.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
+                repaidDiff = newTotalRepaid - oldTotalRepaid;
+
+                if (updatedData.loan.payments) {
+                    const changedPayment = updatedData.loan.payments.find((p, idx) => {
+                        const oldP = oldBorrower.loan?.payments?.find(op => op.date === p.date);
+                        return !oldP || oldP.amount !== p.amount;
+                    });
+                    if (changedPayment) {
+                        paymentDate = changedPayment.date;
+                        const oldP = oldBorrower.loan?.payments?.find(op => op.date === changedPayment.date);
+                        paymentAmountDiff = changedPayment.amount - (oldP ? oldP.amount : 0);
+                    }
+                }
+            }
+        }
+
+        if (borrowedDiff !== 0 || repaidDiff !== 0 || paymentAmountDiff !== 0 || loanAmountDiff !== 0) {
+            await updateMetadata(borrowedDiff, repaidDiff, 0, paymentDate, paymentAmountDiff, loanDate, loanAmountDiff);
+        }
+
         setBorrowers(prev => prev.map(b => b.id === borrowerId ? { ...b, ...dataToUpdate } : b));
     };
 
     const deleteBorrower = async (borrowerId) => {
         if (!villageId) return;
-        const sessionDocId = `${line}_${day}_${session}`;
+        const sessionDocId = `${lineId}_${day}_${session}`;
         const borrowerRef = doc(db, "lines", sessionDocId, "villages", villageId, "borrowers", borrowerId);
         await deleteDoc(borrowerRef);
+        
+        // Note: We DO NOT decrement totalBorrowed or totalRepaid because the user 
+        // wants historical insights to stay forever.
+        // We also keep totalBorrowers as a "Total ever handled" count.
+        
         setBorrowers(prev => prev.filter(b => b.id !== borrowerId));
     };
 
@@ -221,12 +344,16 @@ export default function LineDaySession() {
         }
     }
 
+    const isUnlocked = unlockedLines.includes(lineId);
+
+    if (!isUnlocked && lineId) return <main className="min-h-screen bg-gray-50 flex items-center justify-center"><DualCircleLoader /></main>;
+
     if (!selectedVillage) {
         return (
             <main className="min-h-screen bg-gray-50 flex flex-col items-center p-6">
                 <div className="mb-10 text-center">
-                    <h1 className="text-4xl md:text-5xl font-extrabold text-emerald-700">
-                        Reddy Finance
+                    <h1 className="text-4xl md:text-5xl font-extrabold text-yellow-500">
+                        Sri Balaji Finance
                     </h1>
                     <p className="mt-2 text-gray-600">
                         {`Villages for ${lineName.toUpperCase()} on ${day.toUpperCase()} (${session.toUpperCase()})`}
@@ -238,8 +365,8 @@ export default function LineDaySession() {
                 ) : (
                     <div className="w-full max-w-2xl bg-white rounded-2xl shadow-lg p-6 flex flex-col gap-4">
                         <button
-                            onClick={() => navigate(-1)}
-                            className="self-start mb-4 px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 transition-colors"
+                            onClick={() => navigate(`/${lineId}/${day}`)}
+                            className="self-start mb-4 px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 transition-colors cursor-pointer"
                         >
                             ← Back to Sessions
                         </button>
@@ -250,8 +377,8 @@ export default function LineDaySession() {
                             villages.map((v) => (
                                 <button
                                     key={v.id}
-                                    onClick={() => navigate(`/${line}/${day}/${session}/${v.id}`)}
-                                    className="py-3 px-4 bg-emerald-50 rounded-lg text-emerald-700 text-lg md:text-xl text-center font-medium hover:bg-emerald-600 hover:text-white transition-all duration-200"
+                                    onClick={() => navigate(`/${lineId}/${day}/${session}/${v.id}`)}
+                                    className="py-3 px-4 bg-yellow-50 rounded-lg text-yellow-500 text-lg md:text-xl text-center font-medium hover:bg-yellow-400 hover:text-black transition-all duration-200 cursor-pointer"
                                 >
                                     {v.name.toUpperCase()}
                                 </button>
@@ -262,7 +389,7 @@ export default function LineDaySession() {
 
                 <button
                     onClick={handlePlusClick}
-                    className="fixed right-5 bottom-5 w-14 h-14 rounded-full bg-white shadow-2xl shadow-emerald-600 flex items-center justify-center transition cursor-pointer"
+                    className="fixed right-5 bottom-5 w-14 h-14 rounded-full bg-white shadow-2xl shadow-yellow-400 flex items-center justify-center transition cursor-pointer"
                 >
                     <img className="w-10 h-10" src={`${import.meta.env.BASE_URL}plus.svg`} alt="add-entry" />
                 </button>
@@ -283,11 +410,11 @@ export default function LineDaySession() {
 
     return (
         <div className="w-screen h-screen flex flex-col bg-white relative">
-            <div className="sticky top-0 z-20 flex justify-between items-center p-2 md:p-4 bg-emerald-700 text-white shadow">
+            <div className="sticky top-0 z-20 flex justify-between items-center p-2 md:p-4 bg-yellow-400 text-black shadow">
                 <div className="flex items-center gap-2">
                     <button 
-                        onClick={() => navigate(`/${line}/${day}/${session}`)}
-                        className="px-2 py-1 cursor-pointer hover:bg-emerald-600 rounded transition-colors"
+                        onClick={() => navigate(`/${lineId}/${day}/${session}`)}
+                        className="px-2 py-1 cursor-pointer hover:bg-yellow-500 rounded transition-colors"
                     >
                         ←
                     </button>
@@ -298,14 +425,14 @@ export default function LineDaySession() {
                 <div className="flex items-center gap-3 ml-auto">
                     <button
                         onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                        className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-sm"
+                        className="px-3 py-1 rounded bg-yellow-500 text-black text-sm cursor-pointer"
                     >
                         Prev
                     </button>
-                    <span className="text-sm font-medium hidden md:block">Page {page}</span>
+                    <span className="text-sm font-medium hidden md:block">{page}</span>
                     <button
                         onClick={() => setPage((p) => p + 1)}
-                        className="px-3 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-sm"
+                        className="px-3 py-1 rounded bg-yellow-500 text-black text-sm cursor-pointer"
                     >
                         Next
                     </button>
@@ -346,7 +473,7 @@ export default function LineDaySession() {
                     dispatch={(action) => {
                         if (action.type === "UPDATE_PAYMENT") {
                             setBorrowers(prev => prev.map(b => b.id === editingBorrower.id ? { ...b, loan: action.payload.loan } : b));
-                            updateBorrower(editingBorrower.id, { loan: action.payload.loan });
+                            updateBorrower(editingBorrower.id, { loan: action.payload.loan, selectedDate:action.payload.selectedDate });
                         }
                     }}
                     onClose={() => setEditingBorrower(null)}
@@ -367,7 +494,7 @@ export default function LineDaySession() {
                 <AddBorrowerPopUp
                     borrower={repayBorrower}
                     onRepay={async (updatedBorrower) => {
-                        await updateBorrower(updatedBorrower.id, { loan: updatedBorrower.loan });
+                        await updateBorrower(updatedBorrower.id, { loan: updatedBorrower.loan }, true);
                         setRepayBorrower(null);
                     }}
                     onClose={() => setRepayBorrower(null)}

@@ -13,11 +13,11 @@ const BorrowerDetailsPopUp=({borrower, onClose, onDelete})=>{
   return (
     <div className="fixed inset-0 bg-transparent flex items-center justify-center z-50">
       <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-2xl">
-        <h2 className="text-xl font-bold text-emerald-700 mb-4">
+        <h2 className="text-xl font-bold text-yellow-500 mb-4">
           {loan.cardNo}. {borrower.name.toUpperCase()}
         </h2>
         <div className="space-y-3">
-          <div className="p-3 border rounded bg-emerald-50">
+          <div className="p-3 border rounded bg-yellow-50">
             <p>Start date: {loan.startDate.split("-").reverse().join("/")}</p>
             <p>Total amount: {loan.borrowed}</p>
             <p>
@@ -31,7 +31,7 @@ const BorrowerDetailsPopUp=({borrower, onClose, onDelete})=>{
                 Mobile: {borrower.mobileNo} {" "}
                 <a
                   href={`tel:${borrower.mobileNo}`}
-                  className="inline-block ml-2 px-2 py-1 bg-emerald-600 text-white rounded hover:bg-emerald-700"
+                  className="inline-block ml-2 px-2 py-1 bg-yellow-400 text-black rounded hover:bg-yellow-500"
                   title="Call"
                 >
                   Call
@@ -65,7 +65,7 @@ const BorrowerDetailsPopUp=({borrower, onClose, onDelete})=>{
           </button>
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded bg-emerald-600 text-white hover:bg-emerald-700"
+            className="px-4 py-2 rounded bg-yellow-400 text-black hover:bg-yellow-500"
           >
             Close
           </button>
