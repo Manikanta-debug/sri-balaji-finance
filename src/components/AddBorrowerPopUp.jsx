@@ -3,19 +3,19 @@
 import { useState } from "react";
 import { db } from "../firebase";
 import { useParams } from "react-router-dom";
-import { collection, addDoc, getDocs, getDoc, doc as firestoreDoc, updateDoc } from "firebase/firestore";
-export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, onRepay }) {
-  console.log(newCardNo)
+import { getDoc, doc as firestoreDoc, updateDoc } from "firebase/firestore";
+import { getLocalDateInputValue, toStorageDate } from "../utils/date";
+const AddBorrowerPopUp = ({ onAdd, onClose, borrower, onRepay }) => {
   const isRepay = !!borrower;
   const [name, setName] = useState(borrower ? borrower.name : "");
-  const [borrowed, setBorrowed] = useState("");
-  const [cardNo, setCardNo] = useState("");
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const [startDate, setStartDate] = useState(borrower && borrower.loan && borrower.loan.startDate ? borrower.loan.startDate : todayStr);
+  const [borrowed, setBorrowed] = useState(borrower ? borrower.loan?.borrowed || "" : "");
+  const [cardNo, setCardNo] = useState(borrower ? borrower.loan?.cardNo || "" : "");
+  const todayStr = getLocalDateInputValue();
+  const [startDate, setStartDate] = useState(borrower && borrower.loan && borrower.loan.startDate ? toStorageDate(borrower.loan.startDate) : todayStr);
   const [mobileNo, setMobileNo] = useState(borrower && borrower.mobileNo ? borrower.mobileNo : "");
   const [location, setLocation] = useState(borrower && borrower.location ? borrower.location : "");
 
-  const { lineId, day, session } = useParams();
+  const { lineId, day } = useParams();
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
@@ -42,6 +42,7 @@ export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, 
         onClose();
         return;
       }
+
       const newBorrower = {
         name: name.trim(),
         loan: {
@@ -54,7 +55,7 @@ export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, 
       if (mobileNo && mobileNo.trim() !== "") newBorrower.mobileNo = mobileNo;
       if (location && location.trim() !== "") newBorrower.location = location;
       if (onAdd) {
-        onAdd(newBorrower);
+        await onAdd(newBorrower);
       }
 
       // Optimize: Use lineId directly from params
@@ -63,9 +64,10 @@ export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, 
         const lineSnap = await getDoc(lineRef);
         if (lineSnap.exists()) {
           const lineData = lineSnap.data();
-          const prevDay = lineData.days[day] || { sessions: [], startDate: null };
+          const days = lineData.days || {};
+          const prevDay = days[day] || { sessions: [], startDate: null };
           if (!onRepay && !prevDay.startDate) {
-            const newDays = { ...lineData.days, [day]: { ...prevDay, startDate } };
+            const newDays = { ...days, [day]: { ...prevDay, startDate } };
             await updateDoc(lineRef, { days: newDays });
           }
         }
@@ -185,4 +187,6 @@ export default function AddBorrowerPopUp({ newCardNo, onAdd, onClose, borrower, 
       </div>
     </div>
   );
-}
+};
+
+export default AddBorrowerPopUp;

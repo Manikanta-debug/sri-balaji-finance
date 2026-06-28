@@ -1,9 +1,13 @@
+import PropTypes from "prop-types";
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import AddLinePopUp from "../components/AddLinePopUp";
 import DualCircleLoader from "../components/DualCircleLoader"
+import DeleteIconButton from "../components/DeleteIconButton";
 import { db } from "../firebase";
-import { collection, getDocs, addDoc, updateDoc, doc, getDoc } from "firebase/firestore";
+import { collection, getDocs, addDoc, updateDoc, doc } from "firebase/firestore";
+import { deleteDayCascade, deleteLineCascade, deleteSessionForDay } from "../utils/firestoreCascadeDelete";
+import { invalidateDashboardCache } from "../utils/dashboardCache";
 
 const LineSessions = ({ unlockedLines, setUnlockedLines }) => {
   const { lineId, day } = useParams();
@@ -16,6 +20,7 @@ const LineSessions = ({ unlockedLines, setUnlockedLines }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [addMode, setAddMode] = useState('line');
   const [loading, setLoading] = useState("");
+  const [deletingKey, setDeletingKey] = useState("");
 
   const fetchLines = async () => {
     try {
@@ -73,15 +78,17 @@ const LineSessions = ({ unlockedLines, setUnlockedLines }) => {
 
   const addDay = async (lId, d, startDate) => {
     const lineData = entries[lId];
-    if (lineData.days && Object.keys(lineData.days).includes(d)) {
+    const days = lineData?.days || {};
+    if (Object.keys(days).includes(d)) {
       alert(`Day '${d.charAt(0).toUpperCase() + d.slice(1)}' already exists for this line.`);
       return;
     }
     setLoading("addDay");
     try {
       const lineRef = doc(db, "lines", lId);
-      const newDays = { ...lineData.days, [d]: { sessions: ["morning", "afternoon"], startDate } };
+      const newDays = { ...days, [d]: { sessions: ["morning", "afternoon"], startDate } };
       await updateDoc(lineRef, { days: newDays });
+      invalidateDashboardCache(lId);
       setEntries(prev => ({
         ...prev,
         [lId]: {
@@ -117,6 +124,110 @@ const LineSessions = ({ unlockedLines, setUnlockedLines }) => {
     navigate(`/${lineId}/${day}/${session}`);
   };
 
+  const removeLineFromState = (targetLineId) => {
+    setEntries((prev) => {
+      const next = {};
+      Object.entries(prev).forEach(([id, value]) => {
+        if (id !== targetLineId && !id.startsWith(`${targetLineId}_`)) {
+          next[id] = value;
+        }
+      });
+      return next;
+    });
+  };
+
+  const handleDeleteLine = async (targetLineId, targetLineName) => {
+    const confirmed = window.confirm(
+      `Delete line "${targetLineName}"? This will permanently remove its days, sessions, villages, borrowers, and daily stats.`
+    );
+    if (!confirmed) return;
+
+    setDeletingKey(`line:${targetLineId}`);
+    try {
+      await deleteLineCascade(targetLineId);
+      removeLineFromState(targetLineId);
+      invalidateDashboardCache(targetLineId);
+      setUnlockedLines((prev) => prev.filter((id) => id !== targetLineId));
+      if (lineId === targetLineId) {
+        navigate("/");
+      }
+    } catch (error) {
+      alert(error?.message || `Failed to delete line "${targetLineName}".`);
+    } finally {
+      setDeletingKey("");
+    }
+  };
+
+  const handleDeleteDay = async (targetDay) => {
+    const confirmed = window.confirm(
+      `Delete day "${targetDay}"? This will permanently remove its sessions, villages, and borrowers.`
+    );
+    if (!confirmed) return;
+
+    setDeletingKey(`day:${targetDay}`);
+    try {
+      await deleteDayCascade(lineId, targetDay);
+      invalidateDashboardCache(lineId);
+      setEntries((prev) => {
+        const currentLine = prev[lineId];
+        if (!currentLine) return prev;
+        const days = currentLine.days || {};
+        const { [targetDay]: omittedDay, ...remainingDays } = days;
+        void omittedDay;
+        return {
+          ...prev,
+          [lineId]: {
+            ...currentLine,
+            days: remainingDays,
+          },
+        };
+      });
+      navigate(`/${lineId}`);
+    } catch (error) {
+      alert(error?.message || `Failed to delete day "${targetDay}".`);
+    } finally {
+      setDeletingKey("");
+    }
+  };
+
+  const handleDeleteSession = async (targetSession) => {
+    const confirmed = window.confirm(
+      `Delete session "${targetSession}"? This will permanently remove its villages and borrowers.`
+    );
+    if (!confirmed) return;
+
+    setDeletingKey(`session:${targetSession}`);
+    try {
+      await deleteSessionForDay(lineId, day, targetSession);
+      invalidateDashboardCache(lineId);
+      setEntries((prev) => {
+        const currentLine = prev[lineId];
+        const currentDay = currentLine?.days?.[day];
+        if (!currentLine || !currentDay) return prev;
+
+        const nextSessions = (currentDay.sessions || []).filter((s) => s !== targetSession);
+        return {
+          ...prev,
+          [lineId]: {
+            ...currentLine,
+            days: {
+              ...currentLine.days,
+              [day]: {
+                ...currentDay,
+                sessions: nextSessions,
+              },
+            },
+          },
+        };
+      });
+      navigate(`/${lineId}/${day}`);
+    } catch (error) {
+      alert(error?.message || `Failed to delete session "${targetSession}".`);
+    } finally {
+      setDeletingKey("");
+    }
+  };
+
   const handlePlusClick = () => {
     if (!lineId) {
       setAddMode('line');
@@ -128,7 +239,7 @@ const LineSessions = ({ unlockedLines, setUnlockedLines }) => {
   };
 
   const uniqueLines = Object.entries(entries)
-    .filter(([id, e]) => e.line)
+    .filter(([, e]) => e.line)
     .map(([id, e]) => ({ id, line: e.line }));
   const daysForLine = lineId && entries[lineId]?.days ? Object.keys(entries[lineId].days) : [];
   const sessionsForDay = lineId && day && entries[lineId]?.days?.[day]?.sessions ? entries[lineId].days[day].sessions : [];
@@ -158,13 +269,20 @@ const LineSessions = ({ unlockedLines, setUnlockedLines }) => {
               <h2 className="text-center text-gray-500">No lines found. Add a new line.</h2>
             ) : (
               uniqueLines.map(({ id, line }) => (
-                <button
-                  key={id}
-                  onClick={() => handleLineClick(id)}
-                  className="py-3 px-4 bg-yellow-50 rounded-lg text-yellow-500 text-lg md:text-xl text-center font-medium hover:bg-yellow-400 hover:text-black transition-all duration-200 cursor-pointer"
-                >
-                  {line.toUpperCase()}
-                </button>
+                <div key={id} className="flex items-stretch gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleLineClick(id)}
+                    className="flex-1 py-3 px-4 bg-yellow-50 rounded-lg text-yellow-500 text-lg md:text-xl text-center font-medium hover:bg-yellow-400 hover:text-black transition-all duration-200 cursor-pointer"
+                  >
+                    {line.toUpperCase()}
+                  </button>
+                  <DeleteIconButton
+                    label={`Delete line ${line}`}
+                    disabled={deletingKey === `line:${id}`}
+                    onClick={() => handleDeleteLine(id, line)}
+                  />
+                </div>
               ))
             )
           )}
@@ -190,13 +308,20 @@ const LineSessions = ({ unlockedLines, setUnlockedLines }) => {
                 <h2 className="text-center text-gray-500">No days found. Add a new day.</h2>
               ) : (
                 daysForLine.map((d) => (
-                  <button
-                    key={d}
-                    onClick={() => handleDayClick(d)}
-                    className="py-3 px-4 bg-yellow-50 rounded-lg text-yellow-500 text-lg md:text-xl text-center font-medium hover:bg-yellow-400 hover:text-black transition-all duration-200 mb-4 w-full cursor-pointer"
-                  >
-                    {d.charAt(0).toUpperCase() + d.slice(1)}
-                  </button>
+                  <div key={d} className="flex items-stretch gap-2 mb-4">
+                    <button
+                      type="button"
+                      onClick={() => handleDayClick(d)}
+                      className="flex-1 py-3 px-4 bg-yellow-50 rounded-lg text-yellow-500 text-lg md:text-xl text-center font-medium hover:bg-yellow-400 hover:text-black transition-all duration-200 cursor-pointer"
+                    >
+                      {d.charAt(0).toUpperCase() + d.slice(1)}
+                    </button>
+                    <DeleteIconButton
+                      label={`Delete day ${d}`}
+                      disabled={deletingKey === `day:${d}`}
+                      onClick={() => handleDeleteDay(d)}
+                    />
+                  </div>
                 ))
               )}
             </>
@@ -215,13 +340,20 @@ const LineSessions = ({ unlockedLines, setUnlockedLines }) => {
                 <h2 className="text-center text-gray-500">No sessions found.</h2>
               ) : (
                 sessionsForDay.map((session) => (
-                  <button
-                    key={session}
-                    onClick={() => handleSessionClick(session)}
-                    className="py-3 px-4 bg-yellow-50 rounded-lg text-yellow-500 text-lg md:text-xl text-center font-medium hover:bg-yellow-400 hover:text-black transition-all duration-200 cursor-pointer mb-2"
-                  >
-                    {session.charAt(0).toUpperCase() + session.slice(1)}
-                  </button>
+                  <div key={session} className="flex items-stretch gap-2 mb-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSessionClick(session)}
+                      className="flex-1 py-3 px-4 bg-yellow-50 rounded-lg text-yellow-500 text-lg md:text-xl text-center font-medium hover:bg-yellow-400 hover:text-black transition-all duration-200 cursor-pointer"
+                    >
+                      {session.charAt(0).toUpperCase() + session.slice(1)}
+                    </button>
+                    <DeleteIconButton
+                      label={`Delete session ${session}`}
+                      disabled={deletingKey === `session:${session}`}
+                      onClick={() => handleDeleteSession(session)}
+                    />
+                  </div>
                 ))
               )}
             </>
@@ -251,6 +383,11 @@ const LineSessions = ({ unlockedLines, setUnlockedLines }) => {
       )}
     </main>
   );
+};
+
+LineSessions.propTypes = {
+  unlockedLines: PropTypes.arrayOf(PropTypes.string).isRequired,
+  setUnlockedLines: PropTypes.func.isRequired,
 };
 
 export default LineSessions;

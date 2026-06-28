@@ -1,3 +1,5 @@
+import { formatDateForDisplay } from "../utils/date";
+
 const SessionTable=({last5Weeks, borrowers, setSelectedBorrower, setEditingBorrower, setRepayBorrower, totals})=>{
   return (
       <div className="w-screen h-screen flex flex-col bg-white flex-1 overflow-auto">
@@ -12,7 +14,7 @@ const SessionTable=({last5Weeks, borrowers, setSelectedBorrower, setEditingBorro
               <th className="border px-3 py-2 text-center">Action</th>
               {last5Weeks.map((date) => (
                 <th key={date} className="border px-3 py-2 text-right">
-                  {date}
+                  {formatDateForDisplay(date)}
                 </th>
               ))}
             </tr>

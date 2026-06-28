@@ -1,7 +1,8 @@
 import { useState } from "react";
 import SimpleLoader from "../components/SimpleLoader"
+import { getLocalDateInputValue } from "../utils/date";
 const AddLinePopUp = ({ loading, onSubmit, days, sessions, setIsModalOpen, addMode }) => {
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = getLocalDateInputValue();
   const defaultForm = {
     line: "",
     day: days[0],

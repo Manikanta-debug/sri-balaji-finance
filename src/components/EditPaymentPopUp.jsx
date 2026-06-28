@@ -1,23 +1,19 @@
 import { useState } from "react";
+import { formatDateForDisplay, toStorageDate } from "../utils/date";
 
 export default function EditPaymentPopUp({ borrower, onClose, dispatch, last5Weeks }) {
-  const weeks = Array.isArray(last5Weeks) ? last5Weeks : [];
+  const weeks = Array.isArray(last5Weeks) ? last5Weeks.map(toStorageDate) : [];
   const loan = borrower.loan || {};
+  const startDate = toStorageDate(loan.startDate);
   
   // Calculate date options based on loan start date
   let options = weeks;
-  if (loan.startDate) {
-    const [sy, sm, sd] = loan.startDate.split("-");
-    const sDate = new Date(sy, sm - 1, sd);
-    options = weeks.filter(dateStr => {
-      const [od, om, oy] = dateStr.split("/");
-      const oDate = new Date(oy, om - 1, od);
-      return oDate >= sDate; // Include start date or later
-    });
+  if (startDate) {
+    options = weeks.filter((dateStr) => dateStr >= startDate);
   }
 
   const [selectedDate, setSelectedDate] = useState(options[0] || "");
-  const currentPayment = loan.payments?.find(p => p.date === selectedDate)?.amount || "";
+  const currentPayment = loan.payments?.find(p => p.date === selectedDate)?.amount ?? "";
   const [amount, setAmount] = useState(currentPayment);
 
   const handleSubmit = (e) => {
@@ -62,7 +58,7 @@ export default function EditPaymentPopUp({ borrower, onClose, dispatch, last5Wee
               className="w-full border rounded px-3 py-2 outline-none focus:ring-2 focus:ring-yellow-400"
             >
               {options.map(date => (
-                <option key={date} value={date}>{date}</option>
+                <option key={date} value={date}>{formatDateForDisplay(date)}</option>
               ))}
             </select>
           </div>

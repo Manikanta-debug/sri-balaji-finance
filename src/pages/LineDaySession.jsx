@@ -1,6 +1,6 @@
-import { useReducer, useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { db } from "../firebase";
-import { collection, getDocs, addDoc, updateDoc, doc, deleteDoc, orderBy, query, getDoc, increment, setDoc } from "firebase/firestore";
+import { collection, addDoc, updateDoc, doc, deleteDoc, increment, setDoc } from "firebase/firestore";
 import { useParams, useNavigate } from "react-router-dom";
 import BorrowerDetailsPopUp from "../components/BorrowerDetailsPopUp";
 import EditPaymentPopUp from "../components/EditPaymentPopUp";
@@ -8,126 +8,41 @@ import AddBorrowerPopUp from "../components/AddBorrowerPopUp";
 import SessionTable from "../components/SessionTable";
 import DualCircleLoader from "../components/DualCircleLoader";
 import AddLinePopUp from "../components/AddLinePopUp";
-
-
-function getLast5Weeks(startDateStr, page = 1) {
-    let baseDate;
-    if (startDateStr) {
-        const [year, month, day] = startDateStr.split("-").map(Number);
-        baseDate = new Date(year, month - 1, day);
-    } else {
-        baseDate = new Date();
-    }
-    const offset = (page - 1) * 5 * 7;
-    baseDate.setDate(baseDate.getDate() + offset);
-    return Array.from({ length: 5 }, (_, i) => {
-        const d = new Date(baseDate);
-        d.setDate(d.getDate() + i * 7);
-        const dd = String(d.getDate()).padStart(2, "0");
-        const mm = String(d.getMonth() + 1).padStart(2, "0");
-        const yyyy = d.getFullYear();
-        return `${dd}/${mm}/${yyyy}`;
-    });
-}
+import DeleteIconButton from "../components/DeleteIconButton";
+import { deleteVillageCascade } from "../utils/firestoreCascadeDelete";
+import { createWeeklyDateSeries, toStorageDate } from "../utils/date";
+import useLineDaySessionData from "../hooks/useLineDaySessionData";
+import { invalidateDashboardCache } from "../utils/dashboardCache";
 
 export default function LineDaySession({ unlockedLines, setUnlockedLines }) {
     const { lineId, day, session, villageId } = useParams();
     const navigate = useNavigate();
-    const [villages, setVillages] = useState([]);
-    const [borrowers, setBorrowers] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [startDate, setStartDate] = useState(null);
-    const [lineName, setLineName] = useState("");
+    const {
+        borrowers,
+        loading,
+        lineName,
+        selectedVillage,
+        setBorrowers,
+        setLoading,
+        setVillages,
+        startDate,
+        villages,
+    } = useLineDaySessionData({
+        lineId,
+        day,
+        session,
+        villageId,
+        unlockedLines,
+        setUnlockedLines,
+        navigate,
+    });
 
     const [page, setPage] = useState(1);
-    const last5Weeks = getLast5Weeks(startDate, page);
+    const last5Weeks = useMemo(() => createWeeklyDateSeries(startDate, page), [startDate, page]);
+    const allowedDateSet = useMemo(() => new Set(last5Weeks), [last5Weeks]);
 
     const [isModalOpen, setIsModalOpen] = useState(false);
-
-    // Memoize the selected village object
-    const selectedVillage = useMemo(() => 
-        villages.find(v => v.id === villageId), 
-    [villages, villageId]);
-
-    // Handle password check
-    useEffect(() => {
-        const checkAuth = async () => {
-            if (lineId && !unlockedLines.includes(lineId)) {
-                const lineRef = doc(db, "lines", lineId);
-                const lineSnap = await getDoc(lineRef);
-                if (lineSnap.exists()) {
-                    const entry = lineSnap.data();
-                    const userPwd = window.prompt(`Enter password for ${entry.line}:`);
-                    if (userPwd === entry.password) {
-                        setUnlockedLines(prev => [...prev, lineId]);
-                        setLineName(entry.line);
-                    } else {
-                        alert("Incorrect password");
-                        navigate("/");
-                    }
-                } else {
-                    navigate("/");
-                }
-            }
-        };
-        checkAuth();
-    }, [lineId, unlockedLines, navigate, setUnlockedLines]);
-
-    useEffect(() => {
-        const fetchLineInfoAndVillages = async () => {
-            setLoading(true);
-            try {
-                // Fetch Line config
-                const lineRef = doc(db, "lines", lineId);
-                const lineSnap = await getDoc(lineRef);
-                if (lineSnap.exists()) {
-                    const lineData = lineSnap.data();
-                    setLineName(lineData.line);
-                    if (lineData.days && lineData.days[day]) {
-                        setStartDate(lineData.days[day].startDate || null);
-                    }
-                }
-
-                // Fetch Villages for this session
-                const sessionDocId = `${lineId}_${day}_${session}`;
-                const villagesCol = collection(db, "lines", sessionDocId, "villages");
-                const snapshot = await getDocs(villagesCol);
-                const villageData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                setVillages(villageData);
-            } catch (error) {
-                console.error("Error fetching villages:", error);
-            } finally {
-                setLoading(false);
-            }
-        };
-        if (lineId && unlockedLines.includes(lineId)) fetchLineInfoAndVillages();
-    }, [lineId, day, session, unlockedLines]);
-
-    useEffect(() => {
-        if (!villageId || !unlockedLines.includes(lineId)) {
-            setBorrowers([]);
-            return;
-        }
-
-        const fetchBorrowers = async () => {
-            setLoading(true);
-            try {
-                const sessionDocId = `${lineId}_${day}_${session}`;
-                const borrowersCol = query(
-                    collection(db, "lines", sessionDocId, "villages", villageId, "borrowers"),
-                    orderBy("loan.cardNo", "asc")
-                );
-                const snapshot = await getDocs(borrowersCol);
-                const data = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
-                setBorrowers(data);
-            } catch (error) {
-                console.error("Error fetching borrowers:", error);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchBorrowers();
-    }, [villageId, lineId, day, session, unlockedLines]);
+    const [deletingKey, setDeletingKey] = useState("");
 
     const onAddVillage = async (data) => {
         const vName = data.village;
@@ -140,6 +55,7 @@ export default function LineDaySession({ unlockedLines, setUnlockedLines }) {
             const docRef = await addDoc(villagesCol, { name: vName });
             const newVillage = { id: docRef.id, name: vName };
             setVillages(prev => [...prev, newVillage]);
+            invalidateDashboardCache(lineId);
             setIsModalOpen(false);
             // Auto-navigate to the new village
             navigate(`/${lineId}/${day}/${session}/${docRef.id}`);
@@ -180,10 +96,7 @@ export default function LineDaySession({ unlockedLines, setUnlockedLines }) {
         }
 
         if (paymentDate && paymentAmountDiff !== 0) {
-            // Convert dd/mm/yyyy to yyyy-mm-dd for consistent storage
-            const [pd, pm, py] = paymentDate.split("/");
-            const dateId = `${py}-${pm}-${pd}`;
-            const dailyRef = doc(db, "lines", lineId, "dailyStats", dateId);
+            const dailyRef = doc(db, "lines", lineId, "dailyStats", paymentDate);
             await setDoc(dailyRef, {
                 [session]: {
                     repaid: increment(paymentAmountDiff)
@@ -195,11 +108,7 @@ export default function LineDaySession({ unlockedLines, setUnlockedLines }) {
 
     const addBorrower = async (newBorrower) => {
         if (!villageId) return;
-        const allowedDates = last5Weeks.map(d => {
-            const [day, month, year] = d.split("/");
-            return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-        });
-        if (!allowedDates.includes(newBorrower.loan.startDate)) {
+        if (!allowedDateSet.has(newBorrower.loan.startDate)) {
             alert("Start date must be one of the current 5 dates shown in the table.");
             return;
         }
@@ -211,23 +120,29 @@ export default function LineDaySession({ unlockedLines, setUnlockedLines }) {
         await updateMetadata(newBorrower.loan.borrowed, 0, 1, null, 0, newBorrower.loan.startDate, newBorrower.loan.borrowed);
         
         setBorrowers(prev => [...prev, { ...newBorrower, id: docRef.id }]);
+        invalidateDashboardCache(lineId);
     };
 
     const updateBorrower = async (borrowerId, updatedData, isRenew = false) => {
         if (!villageId) return;
-        
+
         const oldBorrower = borrowers.find(b => b.id === borrowerId);
         if (!oldBorrower) return;
-        if (updatedData.loan && updatedData.loan.startDate) {
-            if (!last5Weeks.includes(updatedData.selectedDate)) {
-                alert("Start date must be one of the current 5 dates shown in the table.");
-                return;
-            }
+        if (updatedData.selectedDate && !allowedDateSet.has(updatedData.selectedDate)) {
+            alert("Payment date must be one of the current 5 dates shown in the table.");
+            return;
         }
+
+        if (updatedData.loan?.startDate && !allowedDateSet.has(updatedData.loan.startDate)) {
+            alert("Start date must be one of the current 5 dates shown in the table.");
+            return;
+        }
+
         const sessionDocId = `${lineId}_${day}_${session}`;
         const borrowerRef = doc(db, "lines", sessionDocId, "villages", villageId, "borrowers", borrowerId);
-        const { id, ...dataToUpdate } = updatedData;
-        console.log(updatedData)
+        const dataToUpdate = { ...updatedData };
+        delete dataToUpdate.id;
+        delete dataToUpdate.selectedDate;
         await updateDoc(borrowerRef, dataToUpdate);
 
         // Metadata Calculations
@@ -245,23 +160,20 @@ export default function LineDaySession({ unlockedLines, setUnlockedLines }) {
                 borrowedDiff = updatedData.loan.borrowed || 0;
                 loanDate = updatedData.loan.startDate;
                 loanAmountDiff = borrowedDiff;
-                // 2. Keep repaidDiff as 0 because the old repayments should stay in lifetime stats
                 repaidDiff = 0;
             } else {
-                // Check for Borrowed amount change (e.g. during manual edits)
                 borrowedDiff = (updatedData.loan.borrowed || 0) - (oldBorrower.loan?.borrowed || 0);
                 if (borrowedDiff !== 0) {
                     loanDate = updatedData.loan.startDate;
                     loanAmountDiff = borrowedDiff;
                 }
-                
-                // Check for Payment changes
+
                 const oldTotalRepaid = oldBorrower.loan?.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
                 const newTotalRepaid = updatedData.loan.payments?.reduce((sum, p) => sum + p.amount, 0) || 0;
                 repaidDiff = newTotalRepaid - oldTotalRepaid;
 
                 if (updatedData.loan.payments) {
-                    const changedPayment = updatedData.loan.payments.find((p, idx) => {
+                    const changedPayment = updatedData.loan.payments.find((p) => {
                         const oldP = oldBorrower.loan?.payments?.find(op => op.date === p.date);
                         return !oldP || oldP.amount !== p.amount;
                     });
@@ -279,6 +191,7 @@ export default function LineDaySession({ unlockedLines, setUnlockedLines }) {
         }
 
         setBorrowers(prev => prev.map(b => b.id === borrowerId ? { ...b, ...dataToUpdate } : b));
+        invalidateDashboardCache(lineId);
     };
 
     const deleteBorrower = async (borrowerId) => {
@@ -292,6 +205,7 @@ export default function LineDaySession({ unlockedLines, setUnlockedLines }) {
         // We also keep totalBorrowers as a "Total ever handled" count.
         
         setBorrowers(prev => prev.filter(b => b.id !== borrowerId));
+        invalidateDashboardCache(lineId);
     };
 
     const [selectedBorrower, setSelectedBorrower] = useState(null);
@@ -326,14 +240,10 @@ export default function LineDaySession({ unlockedLines, setUnlockedLines }) {
 
 
     const lastDate = last5Weeks[last5Weeks.length - 1];
-    const [d, m, y] = lastDate.split("/").map(Number);
-    const lastDateObj = new Date(y, m - 1, d);
     const filteredBorrowers = borrowers.filter(b => {
         const loan = b.loan;
-        if (!loan || !loan.startDate) return false;
-        const [sy, sm, sd] = loan.startDate.split("-").map(Number);
-        const borrowerStartDate = new Date(sy, sm - 1, sd);
-        return borrowerStartDate <= lastDateObj;
+        if (!loan?.startDate) return false;
+        return toStorageDate(loan.startDate) <= lastDate;
     });
 
     const handlePlusClick = () => {
@@ -343,6 +253,28 @@ export default function LineDaySession({ unlockedLines, setUnlockedLines }) {
             setAddingBorrower(true);
         }
     }
+
+    const handleDeleteVillage = async (targetVillage) => {
+        const confirmed = window.confirm(
+            `Delete village "${targetVillage.name}"? This will permanently remove all borrowers in this village.`
+        );
+        if (!confirmed) return;
+
+        const sessionDocId = `${lineId}_${day}_${session}`;
+        setDeletingKey(`village:${targetVillage.id}`);
+        try {
+            await deleteVillageCascade(sessionDocId, targetVillage.id);
+            setVillages((prev) => prev.filter((v) => v.id !== targetVillage.id));
+            invalidateDashboardCache(lineId);
+            if (villageId === targetVillage.id) {
+                navigate(`/${lineId}/${day}/${session}`);
+            }
+        } catch (error) {
+            alert(error?.message || `Failed to delete village "${targetVillage.name}".`);
+        } finally {
+            setDeletingKey("");
+        }
+    };
 
     const isUnlocked = unlockedLines.includes(lineId);
 
@@ -375,13 +307,20 @@ export default function LineDaySession({ unlockedLines, setUnlockedLines }) {
                             <h2 className="text-center text-gray-500 py-10">No villages found. Add a new village.</h2>
                         ) : (
                             villages.map((v) => (
-                                <button
-                                    key={v.id}
-                                    onClick={() => navigate(`/${lineId}/${day}/${session}/${v.id}`)}
-                                    className="py-3 px-4 bg-yellow-50 rounded-lg text-yellow-500 text-lg md:text-xl text-center font-medium hover:bg-yellow-400 hover:text-black transition-all duration-200 cursor-pointer"
-                                >
-                                    {v.name.toUpperCase()}
-                                </button>
+                                <div key={v.id} className="flex items-stretch gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate(`/${lineId}/${day}/${session}/${v.id}`)}
+                                        className="flex-1 py-3 px-4 bg-yellow-50 rounded-lg text-yellow-500 text-lg md:text-xl text-center font-medium hover:bg-yellow-400 hover:text-black transition-all duration-200 cursor-pointer"
+                                    >
+                                        {v.name.toUpperCase()}
+                                    </button>
+                                    <DeleteIconButton
+                                        label={`Delete village ${v.name}`}
+                                        disabled={deletingKey === `village:${v.id}`}
+                                        onClick={() => handleDeleteVillage(v)}
+                                    />
+                                </div>
                             ))
                         )}
                     </div>

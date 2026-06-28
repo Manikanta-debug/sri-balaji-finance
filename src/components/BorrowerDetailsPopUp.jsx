@@ -1,7 +1,12 @@
 import { useState } from "react";
+import { formatDateForDisplay } from "../utils/date";
 const BorrowerDetailsPopUp=({borrower, onClose, onDelete})=>{
   const [showConfirm, setShowConfirm] = useState(false);
-  const loan = borrower.loan;
+  const loan = borrower.loan || {};
+  const payments = Array.isArray(loan.payments) ? loan.payments : [];
+  const totalRepaid = payments.reduce((sum, p) => sum + p.amount, 0);
+  const formattedStartDate = loan.startDate ? formatDateForDisplay(loan.startDate) : "N/A";
+  const borrowerName = borrower.name ? borrower.name.toUpperCase() : "UNKNOWN";
 
   const handleDelete = () => setShowConfirm(true);
   const handleConfirmDelete = () => {
@@ -14,17 +19,17 @@ const BorrowerDetailsPopUp=({borrower, onClose, onDelete})=>{
     <div className="fixed inset-0 bg-transparent flex items-center justify-center z-50">
       <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-2xl">
         <h2 className="text-xl font-bold text-yellow-500 mb-4">
-          {loan.cardNo}. {borrower.name.toUpperCase()}
+          {loan.cardNo}. {borrowerName}
         </h2>
         <div className="space-y-3">
           <div className="p-3 border rounded bg-yellow-50">
-            <p>Start date: {loan.startDate.split("-").reverse().join("/")}</p>
-            <p>Total amount: {loan.borrowed}</p>
+            <p>Start date: {formattedStartDate}</p>
+            <p>Total amount: {loan.borrowed || 0}</p>
             <p>
-              Total Repaid: {loan.payments.reduce((sum, p) => sum + p.amount, 0)}
+              Total Repaid: {totalRepaid}
             </p>
             <p>
-              Balance: {loan.borrowed - loan.payments.reduce((sum, p) => sum + p.amount, 0)}
+              Balance: {(loan.borrowed || 0) - totalRepaid}
             </p>
             {borrower.mobileNo && (
               <p>
@@ -44,9 +49,9 @@ const BorrowerDetailsPopUp=({borrower, onClose, onDelete})=>{
             <div className="mt-2">
               <h4 className="font-medium">Payments:</h4>
               <ul className="list-disc ml-5">
-                {loan.payments.map((p, i) => (
+                {payments.map((p, i) => (
                   <li key={i}>
-                    {p.date}: {p.amount}
+                    {formatDateForDisplay(p.date)}: {p.amount}
                     {p.amount === 0 && (
                       <span className="text-red-500"> (Missed)</span>
                     )}
